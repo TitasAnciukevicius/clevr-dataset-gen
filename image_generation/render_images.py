@@ -30,6 +30,7 @@ except ImportError as e:
   INSIDE_BLENDER = False
 if INSIDE_BLENDER:
   try:
+    sys.path.append(os.path.dirname(__file__))
     import utils
   except ImportError as e:
     print("\nERROR")
