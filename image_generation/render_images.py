@@ -113,6 +113,9 @@ parser.add_argument('--save_blendfiles', type=int, default=0,
          "each generated image to be stored in the directory specified by " +
          "the --output_blend_dir flag. These files are not saved by default " +
          "because they take up ~5-10MB each.")
+parser.add_argument('--output_depth', default=0, type=int,
+    help="Setting --output_depth to 1 will cause normalized depth-maps " +
+         "to be stored alongside the images")
 parser.add_argument('--version', default='1.0',
     help="String to store in the \"version\" field of the generated JSON file")
 parser.add_argument('--license',
@@ -250,6 +253,18 @@ def render_scene(args,
   bpy.context.scene.cycles.transparent_max_bounces = args.render_max_bounces
   if args.use_gpu == 1:
     bpy.context.scene.cycles.device = 'GPU'
+
+  if args.output_depth:
+    # Following is based on stanford-shapenet-renderer
+    bpy.context.scene.use_nodes = True
+    tree = bpy.context.scene.node_tree
+    render_layers = tree.nodes.new('CompositorNodeRLayers')
+    depth_file_output = tree.nodes.new(type="CompositorNodeOutputFile")
+    depth_file_output.label = 'Depth Output'
+    depth_file_output.file_slots[0].path = '../../' + output_image + '_depth'
+    map = tree.nodes.new(type="CompositorNodeNormalize")  # thus, most distant points have pixel intensity of one, and nearest zero
+    tree.links.new(render_layers.outputs['Depth'], map.inputs[0])
+    tree.links.new(map.outputs[0], depth_file_output.inputs[0])
 
   # This will give ground-truth information about the scene and its objects
   scene_struct = {
