@@ -102,6 +102,9 @@ parser.add_argument('--output_image_dir', default='../output/images/',
 parser.add_argument('--output_scene_dir', default='../output/scenes/',
     help="The directory where output JSON scene structures will be stored. " +
          "It will be created if it does not exist.")
+parser.add_argument('--output_masks_dir', default='../output/masks/',
+    help="The directory where output segmentation masks will be stored. " +
+         "It will be created if it does not exist.")
 parser.add_argument('--output_scene_file', default='../output/CLEVR_scenes.json',
     help="Path to write a single JSON file containing all scene information")
 parser.add_argument('--output_blend_dir', default='output/blendfiles',
@@ -116,6 +119,9 @@ parser.add_argument('--save_blendfiles', type=int, default=0,
          "because they take up ~5-10MB each.")
 parser.add_argument('--output_depth', default=0, type=int,
     help="Setting --output_depth to 1 will cause normalized depth-maps " +
+         "to be stored alongside the images")
+parser.add_argument('--output_masks', default=0, type=int,
+    help="Setting --output_masks to 1 will cause object segmentation masks " +
          "to be stored alongside the images")
 parser.add_argument('--version', default='1.0',
     help="String to store in the \"version\" field of the generated JSON file")
@@ -161,15 +167,19 @@ def main(args):
   prefix = '%s_%s_' % (args.filename_prefix, args.split)
   img_template = '%s%%0%dd.png' % (prefix, num_digits)
   scene_template = '%s%%0%dd.json' % (prefix, num_digits)
+  masks_template = '%s%%0%dd' % (prefix, num_digits)
   blend_template = '%s%%0%dd.blend' % (prefix, num_digits)
   img_template = os.path.join(args.output_image_dir, img_template)
   scene_template = os.path.join(args.output_scene_dir, scene_template)
+  masks_template = os.path.join(args.output_masks_dir, masks_template)
   blend_template = os.path.join(args.output_blend_dir, blend_template)
 
   if not os.path.isdir(args.output_image_dir):
     os.makedirs(args.output_image_dir)
   if not os.path.isdir(args.output_scene_dir):
     os.makedirs(args.output_scene_dir)
+  if args.output_masks == 1 and not os.path.isdir(args.output_masks_dir):
+    os.makedirs(args.output_masks_dir)
   if args.save_blendfiles == 1 and not os.path.isdir(args.output_blend_dir):
     os.makedirs(args.output_blend_dir)
   
@@ -178,6 +188,9 @@ def main(args):
     img_path = img_template % (i + args.start_idx)
     scene_path = scene_template % (i + args.start_idx)
     all_scene_paths.append(scene_path)
+    masks_path = None
+    if args.output_masks == 1:
+      masks_path = masks_template % (i + args.start_idx)
     blend_path = None
     if args.save_blendfiles == 1:
       blend_path = blend_template % (i + args.start_idx)
@@ -188,6 +201,7 @@ def main(args):
       output_split=args.split,
       output_image=img_path,
       output_scene=scene_path,
+      output_masks=masks_path,
       output_blendfile=blend_path,
     )
 
@@ -217,6 +231,7 @@ def render_scene(args,
     output_split='none',
     output_image='render.png',
     output_scene='render_json',
+    output_masks=None,
     output_blendfile=None,
   ):
 
@@ -334,6 +349,9 @@ def render_scene(args,
       break
     except Exception as e:
       print(e)
+
+  if output_masks is not None:
+    render_masks(blender_objects, output_masks)
 
   with open(output_scene, 'w') as f:
     json.dump(scene_struct, f, indent=2)
@@ -574,6 +592,68 @@ def render_shadeless(blender_objects, path='flat.png'):
   render_args.use_antialiasing = old_use_antialiasing
 
   return object_colors
+
+
+def render_masks(blender_objects, path_prefix):
+
+  render_args = bpy.context.scene.render
+
+  # Cache the render args we are about to clobber
+  old_filepath = render_args.filepath
+  old_engine = render_args.engine
+  old_use_antialiasing = render_args.use_antialiasing
+
+  # Override some render settings to have flat shading
+  render_args.filepath = path_prefix
+  render_args.engine = 'BLENDER_RENDER'
+  render_args.use_antialiasing = False
+  render_args.layers['RenderLayer'].use_pass_object_index = True
+
+  bpy.context.scene.use_nodes = True
+  tree = bpy.context.scene.node_tree
+  render_layers = tree.nodes.new('CompositorNodeRLayers')
+  index_buffer = render_layers.outputs['IndexOB']
+
+  masker_nodes = []
+  output_nodes = []
+  masker_to_output_links = []
+  for i, obj in enumerate(blender_objects):
+    obj.pass_index = i + 1
+    masker = tree.nodes.new('CompositorNodeIDMask')
+    masker.index = i + 1
+    masker_nodes.append(masker)
+    tree.links.new(index_buffer, masker.inputs[0])
+    mask_file_output = tree.nodes.new("CompositorNodeOutputFile")
+    mask_file_output.file_slots[0].path = 'mask_{:02}_modal_###.png'.format(i + 1)
+    output_nodes.append(mask_file_output)
+    masker_to_output_links.append(tree.links.new(masker.outputs[0], mask_file_output.inputs[0]))
+
+  # Render all the modal masks
+  bpy.ops.render.render(write_still=False)
+
+  for i, obj in enumerate(blender_objects):
+    utils.set_layer(obj, 2)
+    tree.links.remove(masker_to_output_links[i])
+    tree.nodes.remove(output_nodes[i])
+
+  # Render each amodal mask
+  for i, obj in enumerate(blender_objects):
+    utils.set_layer(obj, 0)
+    output_node = tree.nodes.new("CompositorNodeOutputFile")
+    output_node.file_slots[0].path = 'mask_{:02}_amodal_###.png'.format(i + 1)
+    masker_to_output = tree.links.new(masker_nodes[i].outputs[0], output_node.inputs[0])
+    bpy.ops.render.render(write_still=False)
+    tree.links.remove(masker_to_output)
+    tree.nodes.remove(output_node)
+    utils.set_layer(obj, 2)
+
+  for i, obj in enumerate(blender_objects):
+    utils.set_layer(obj, 0)
+
+  # Set the render settings back to what they were
+  render_args.filepath = old_filepath
+  render_args.engine = old_engine
+  render_args.use_antialiasing = old_use_antialiasing
 
 
 if __name__ == '__main__':
