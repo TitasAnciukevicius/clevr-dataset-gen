@@ -82,6 +82,9 @@ parser.add_argument('--min_pixels_per_object', default=10, type=int,
 parser.add_argument('--max_retries', default=50, type=int,
     help="The number of times to try placing an object before giving up and " +
          "re-placing all objects in the scene.")
+parser.add_argument('--no_background', default=0, type=int,
+    help="Set --no_background to 1 to remove the ground plane, leaving" +
+         "a black background")
 
 # Output settings
 parser.add_argument('--start_idx', default=0, type=int,
@@ -339,6 +342,10 @@ def render_scene(args,
 
   # Now make some random objects
   objects, blender_objects = add_random_objects(scene_struct, num_objects, args, camera)
+
+  if args.no_background:
+    # This must come after add_random_objects, as that also changes the ground layer
+    utils.set_layer(bpy.data.objects['Ground'], 2)
 
   # Render the scene and dump the scene data structure
   scene_struct['objects'] = objects
