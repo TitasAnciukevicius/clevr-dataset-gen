@@ -85,6 +85,9 @@ parser.add_argument('--max_retries', default=50, type=int,
 parser.add_argument('--no_background', default=0, type=int,
     help="Set --no_background to 1 to remove the ground plane, leaving" +
          "a black background")
+parser.add_argument('--background_intensities', default=[0.8], type=float, nargs='+',
+    help="Specifies a list of diffuse intensities for the background, from which " +
+         "one is randomly selected")
 
 # Output settings
 parser.add_argument('--start_idx', default=0, type=int,
@@ -346,6 +349,13 @@ def render_scene(args,
   if args.no_background:
     # This must come after add_random_objects, as that also changes the ground layer
     utils.set_layer(bpy.data.objects['Ground'], 2)
+  else:
+    # Note that in base_scene, the ground has no material (hence uses blender's default)
+    bpy.ops.material.new()
+    ground_mat = bpy.data.materials[-1]
+    background_intensity = args.background_intensities[random.randrange(len(args.background_intensities))]
+    ground_mat.diffuse_color = [background_intensity] * 3
+    bpy.data.objects['Ground'].data.materials.append(ground_mat)
 
   # Render the scene and dump the scene data structure
   scene_struct['objects'] = objects
