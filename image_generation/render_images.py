@@ -9,6 +9,7 @@ from __future__ import print_function
 import math, sys, random, argparse, json, os, tempfile
 from datetime import datetime as dt
 from collections import Counter
+import subprocess
 
 """
 Renders random scenes using Blender, each with with a random number of objects;
@@ -147,6 +148,8 @@ parser.add_argument('--width', default=160, type=int,
     help="The width (in pixels) for the rendered images")
 parser.add_argument('--height', default=120, type=int,
     help="The height (in pixels) for the rendered images")
+parser.add_argument('--crop', default=0, type=int,
+    help="If non-zero, extract a square center-crop of this size")
 parser.add_argument('--key_light_jitter', default=1.0, type=float,
     help="The magnitude of random jitter to add to the key light position.")
 parser.add_argument('--fill_light_jitter', default=1.0, type=float,
@@ -229,6 +232,12 @@ def main(args):
   with open(args.output_scene_file, 'w') as f:
     json.dump(output, f)
 
+
+def maybe_crop(image_filename):
+  if args.crop:
+    left_margin = (args.width - args.crop) // 2
+    top_margin = (args.height - args.crop) // 2
+    subprocess.run(['convert', image_filename, '-crop', '{}x{}+{}+{}'.format(args.crop, args.crop, left_margin, top_margin), image_filename])
 
 
 def render_scene(args,
@@ -366,6 +375,11 @@ def render_scene(args,
       break
     except Exception as e:
       print(e)
+
+  if args.crop:
+    maybe_crop(output_image)
+    if args.output_depth:
+      raise NotImplementedError
 
   if output_masks is not None:
     render_masks(blender_objects, output_masks)
@@ -649,6 +663,7 @@ def render_masks(blender_objects, path_prefix):
   bpy.ops.render.render(write_still=False)
 
   for i, obj in enumerate(blender_objects):
+    maybe_crop(os.path.join(path_prefix, output_nodes[i].file_slots[0].path.replace('###', '001')))
     utils.set_layer(obj, 2)
     tree.links.remove(masker_to_output_links[i])
     tree.nodes.remove(output_nodes[i])
@@ -660,6 +675,7 @@ def render_masks(blender_objects, path_prefix):
     output_node.file_slots[0].path = 'mask_{:02}_amodal_###.png'.format(i + 1)
     masker_to_output = tree.links.new(masker_nodes[i].outputs[0], output_node.inputs[0])
     bpy.ops.render.render(write_still=False)
+    maybe_crop(os.path.join(path_prefix, output_node.file_slots[0].path.replace('###', '001')))
     tree.links.remove(masker_to_output)
     tree.nodes.remove(output_node)
     utils.set_layer(obj, 2)
