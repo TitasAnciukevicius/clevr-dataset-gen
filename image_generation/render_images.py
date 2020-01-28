@@ -360,9 +360,8 @@ def render_scene(args,
     utils.set_layer(bpy.data.objects['Ground'], 2)
   else:
     # Note that in base_scene, the ground has no material (hence uses blender's default)
-    bpy.ops.material.new()
-    ground_mat = bpy.data.materials['Material']
-    ground_mat.name = 'Ground_Material'
+    bpy.data.materials.new(name='Ground_Material')
+    ground_mat = bpy.data.materials['Ground_Material']
     background_intensity = args.background_intensities[random.randrange(len(args.background_intensities))]
     ground_mat.diffuse_color = [background_intensity] * 3
     bpy.data.objects['Ground'].data.materials.append(ground_mat)
